@@ -1,4 +1,306 @@
-local ziparchive = require 'ziparchive'
+#include "olua.h"
+
+OLUA_BEGIN_DECLS
+#include "lxplib.h"
+#include "luazip.h"
+OLUA_END_DECLS
+
+static const char *lxplom_src = R"~~~(
+-- See Copyright Notice in license.html
+-- $Id: lom.lua,v 1.6 2005/06/09 19:18:40 tuler Exp $
+
+local lxp = require "lxp"
+
+local tinsert, tremove = table.insert, table.remove
+local assert, type, print = assert, type, print
+
+
+local function starttag (p, tag, attr)
+  local stack = p:getcallbacks().stack
+  local newelement = {tag = tag, attr = attr}
+  tinsert(stack, newelement)
+end
+
+local function endtag (p, tag)
+  local stack = p:getcallbacks().stack
+  local element = tremove(stack)
+  assert(element.tag == tag)
+  local level = #stack
+  tinsert(stack[level], element)
+end
+
+local function text (p, txt)
+  local stack = p:getcallbacks().stack
+  local element = stack[#stack]
+  local n = #element
+  if type(element[n]) == "string" then
+    element[n] = element[n] .. txt
+  else
+    tinsert(element, txt)
+  end
+end
+
+local function parse (o)
+  local c = { StartElement = starttag,
+              EndElement = endtag,
+              CharacterData = text,
+              _nonstrict = true,
+              stack = {{}}
+            }
+  local p = lxp.new(c)
+  local status, err
+  if type(o) == "string" then
+    status, err = p:parse(o)
+    if not status then return nil, err end
+  else
+    for l in pairs(o) do
+      status, err = p:parse(l)
+      if not status then return nil, err end
+    end
+  end
+  status, err = p:parse()
+  if not status then return nil, err end
+  p:close()
+  return c.stack[1][1]
+end
+
+return { parse = parse }
+)~~~";
+
+static const char *xmlize_src = R"~~~(
+local _ENV = setmetatable({}, {__index = _ENV})
+
+-- Loosely based on a PHP implementation.
+local lom = require "lxp.lom"
+
+local function xml_depth(vals)
+	local valCount = #vals
+	if valCount == 1  and  type(vals[1]) ~= 'table' then
+		return vals[1]
+	end
+
+	local orderTable = {}
+	local children = { ['*'] = orderTable }
+
+	for i = 1, #vals do
+		local val = vals[i]
+		if type(val) == "table" then
+			children[#children + 1] = val.tag
+			local tagEntry = children[val.tag]
+			if not tagEntry then
+				tagEntry = {}
+				children[val.tag] = tagEntry
+			end
+
+			local entry = {}
+			tagEntry[#tagEntry + 1] = entry
+			orderTable[#orderTable + 1] = { val.tag, #tagEntry }
+
+			entry['@'] = val.attr
+			entry['#'] = xml_depth(val)
+		else
+			children[#children + 1] = val
+		end
+	end
+
+	return children
+end
+
+
+function luaize(data)
+	data = data:gsub('<%?xml.-%?>(.+)', "%1")
+	data = '<root>' .. data .. '</root>'
+
+	local vals, err = lom.parse(data)
+
+    array = xml_depth(vals)
+
+	return array
+end
+
+
+---------------------------------------------------------------------------------
+-- Encoding routines stolen from Lua Element Tree.
+local mapping = { ['&']  = "&amp;"  ,
+                  ['<']  = "&lt;"   ,
+                  ['>']  = "&gt;"   ,
+                  ['"']  = "&quot;" ,
+                  ["'"]  = "&apos;" , -- not used
+                  ["\t"] = "&#9;"    ,
+                  ["\r"] = "&#13;"   ,
+                  ["\n"] = "&#10;"   }
+
+local function map(symbols)
+  local array = {}
+  for _, symbol in ipairs(symbols) do
+    table.insert(array, {symbol, mapping[symbol]})
+  end
+  return array
+end
+
+encoding = {}
+
+encoding[1] = { map{'&', '<'}      ,
+                map{'&', '<', '"'} }
+
+encoding[2] = { map{'&', '<', '>'}      ,
+                map{'&', '<', '>', '"'} }
+
+encoding[3] = { map{'&', '\r', '<', '>'}                  ,
+                map{'&', '\r', '\n', '\t', '<', '>', '"'} }
+
+encoding[4] = { map{'&', '\r', '\n', '\t', '<', '>', '"'} ,
+                map{'&', '\r', '\n', '\t', '<', '>', '"'} }
+
+encoding["minimal"]   = encoding[1]
+encoding["standard"]  = encoding[2]
+encoding["strict"]    = encoding[3]
+encoding["most"]      = encoding[4]
+
+local _encode = function(text, encoding)
+	for _, key_value in pairs(encoding) do
+		text = text:gsub(key_value[1], key_value[2])
+	end
+	return text
+end
+---------------------------------------------------------------------------------
+
+local srep = string.rep
+
+local function xmlsave_recurse(indent, luaTable, xmlTable, maxIndentLevel)
+	local tabs = ''
+	if indent then
+		if not maxIndentLevel  or indent <= maxIndentLevel then
+			tabs = srep('\t', indent)
+		end
+	end
+	local keys = {}
+	local entryOrder
+	if luaTable[1] then
+		for _, key in ipairs(luaTable) do
+			local whichIndex = keys[key]
+			if not whichIndex then
+				keys[key] = 0
+				whichIndex = 0
+			end
+			whichIndex = whichIndex + 1
+			keys[key] = whichIndex
+
+			local section = luaTable[key]
+			if not section then
+				if not indent then
+					-- Generally whitespace.
+					xmlTable[#xmlTable + 1] = key
+				end
+			else
+				local entry = section[whichIndex]
+				if not entry then
+					error('xmlsave: syntax bad')
+				end
+
+				xmlTable[#xmlTable + 1] = tabs .. '<' .. key
+
+				local attributes = entry['@']
+				if attributes then
+					if not indent then
+						for _, attrKey in ipairs(attributes) do
+							xmlTable[#xmlTable + 1] = ' ' .. attrKey .. '="' .. attributes[attrKey] .. '"'
+						end
+					else
+						for attrKey, attrValue in pairs(attributes) do
+							if type(attrKey) == 'string' then
+								xmlTable[#xmlTable + 1] = ' ' .. attrKey .. '="' .. attrValue .. '"'
+							end
+						end
+					end
+				end
+
+				xmlTable[#xmlTable + 1] = '>'
+
+				local elements = entry['#']
+				if type(elements) == 'table' then
+					if indent then
+						xmlTable[#xmlTable + 1] = '\n'
+					end
+					xmlsave_recurse(indent and (indent + 1) or nil, elements, xmlTable, maxIndentLevel)
+				else
+					xmlTable[#xmlTable + 1] = _encode(elements, encoding[4][1])
+				end
+
+				if indent and type(elements) == 'table' then
+					xmlTable[#xmlTable + 1] = tabs
+				end
+				xmlTable[#xmlTable + 1] = '</' .. key .. '>'
+				if indent then
+					xmlTable[#xmlTable + 1] = '\n'
+				end
+			end
+		end
+	else
+		for key, value in pairs(luaTable) do
+			if type(value) == 'table' then
+				for _, entry in ipairs(value) do
+					xmlTable[#xmlTable + 1] = tabs .. '<' .. key
+
+					local attributes = entry['@']
+					if attributes then
+						if not indent then
+							for _, attrKey in ipairs(attributes) do
+								xmlTable[#xmlTable + 1] = ' ' .. attrKey .. '="' .. attributes[attrKey] .. '"'
+							end
+						else
+							for attrKey, attrValue in pairs(attributes) do
+								if type(attrKey) == 'string' then
+									xmlTable[#xmlTable + 1] = ' ' .. attrKey .. '="' .. attrValue .. '"'
+								end
+							end
+						end
+					end
+
+					xmlTable[#xmlTable + 1] = '>'
+
+					local elements = entry['#']
+					if type(elements) == 'table' then
+						if indent then
+							xmlTable[#xmlTable + 1] = '\n'
+						end
+						xmlsave_recurse(indent and (indent + 1) or nil, elements, xmlTable, maxIndentLevel)
+					else
+						xmlTable[#xmlTable + 1] = _encode(elements, encoding[4][1]) 
+					end
+
+					if indent and type(elements) == 'table' then
+						xmlTable[#xmlTable + 1] = tabs
+					end
+					xmlTable[#xmlTable + 1] = '</' .. key .. '>'
+					if indent then
+						xmlTable[#xmlTable + 1] = '\n'
+					end
+				end
+			end
+		end
+	end
+end
+
+
+function xmlize(outFilename, luaTable, indent, maxIndentLevel)
+	local xmlTable = {}
+	xmlsave_recurse(indent, luaTable, xmlTable, maxIndentLevel)
+	local outText = table.concat(xmlTable)
+	if outFilename == ':string' then
+		return outText
+	else
+		local file = io.open(outFilename, "wt")
+		file:write(table.concat(xmlTable))
+		file:close()
+	end
+end
+
+return _ENV
+)~~~";
+
+static const char *xlsx_src = R"~~~(
+local ziparchive = require 'zip'
 local xmlize = require 'xmlize'
 
 local M = {}
@@ -6,10 +308,10 @@ local M = {}
 local colRowPattern = "([a-zA-Z]*)(%d*)"
 
 local function _xlsx_readdocument(xlsx, documentName)
-    local file = xlsx.archive:fileopen(documentName)
+    local file = xlsx.archive:open(documentName)
     if not file then return end
-    local buffer = xlsx.archive:fileread(file)
-    xlsx.archive:fileclose(file)
+    local buffer = file:read('*a')
+    file:close()
     return xmlize.luaize(buffer)
 end
 
@@ -263,8 +565,9 @@ function M.Workbook(filename)
 
     self.archive = ziparchive.open(filename)
 
-    local sharedStringsXml = _xlsx_readdocument(self, 'xl/sharedstrings.xml')
+    local sharedStringsXml = _xlsx_readdocument(self, 'xl/sharedStrings.xml')
     self.sharedStrings = {}
+
     if sharedStringsXml then
         for _, str in ipairs(sharedStringsXml.sst[1]['#'].si) do
             if str['#'].r then
@@ -335,3 +638,30 @@ print(sheet.B1)
 --]]
 
 -- vim: set tabstop=4 expandtab:
+)~~~";
+
+static int luaopen_lxp_lom(lua_State *L) {
+    luaL_loadstring(L, lxplom_src);
+    lua_call(L, 0, 1);
+    return 1;
+}
+
+static int luaopen_xmlize(lua_State *L) {
+    luaL_loadstring(L, xmlize_src);
+    lua_call(L, 0, 1);
+    return 1;
+}
+
+OLUA_BEGIN_DECLS
+OLUA_LIB int luaopen_xlsx(lua_State* L)
+{
+    olua_require(L, "lxp", luaopen_lxp);
+    olua_require(L, "lxp.lom", luaopen_lxp_lom);
+    olua_require(L, "xmlize", luaopen_xmlize);
+    olua_require(L, "zip", luaopen_zip);
+
+    luaL_loadstring(L, xlsx_src);
+    lua_call(L, 0, 1);
+    return 1;
+}
+OLUA_END_DECLS

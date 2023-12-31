@@ -1,0 +1,4 @@
+build/
+test/*.so
+test/*.dll
+test/*.exe

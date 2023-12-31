@@ -1,0 +1,24 @@
+[submodule "lua54"]
+	path = lua54
+	url = git@github.com:luacmake/lua.git
+[submodule "lua53"]
+	path = lua53
+	url = git@github.com:luacmake/lua.git
+[submodule "libexpat"]
+	path = libexpat
+	url = git@github.com:libexpat/libexpat.git
+[submodule "luazip"]
+	path = luazip
+	url = git@github.com:mpeterv/luazip.git
+[submodule "zziplib"]
+	path = zziplib
+	url = git@github.com:gdraheim/zziplib.git
+[submodule "olua"]
+	path = olua
+	url = git@github.com:zhongfq/olua.git
+[submodule "zlib"]
+	path = zlib
+	url = git@github.com:madler/zlib.git
+[submodule "luaexpat"]
+	path = luaexpat
+	url = git@github.com:LuaDist/luaexpat.git
