@@ -408,7 +408,12 @@ local __sheetMetatable = {
                                 data = data == '1'
                             else
                                 local cellS = tonumber(columnNode['@'].s)
-                                local numberStyle = self.workbook.styles.cellXfs[cellS - 1].numFmtId
+                                local cellStyle = self.workbook.styles.cellXfs[cellS - 1]
+                                if not cellStyle then
+                                    error(string.format("no cell style at %s%d in sheet '%s'",
+                                        colLetters, rowNum, self.name))
+                                end
+                                local numberStyle = cellStyle.numFmtId
                                 if not numberStyle then
                                     numberStyle = 0
                                 end
