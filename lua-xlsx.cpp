@@ -409,20 +409,21 @@ local __sheetMetatable = {
                             else
                                 local cellS = tonumber(columnNode['@'].s)
                                 local cellStyle = self.workbook.styles.cellXfs[cellS - 1]
-                                if not cellStyle then
-                                    error(string.format("no cell style at %s%d in sheet '%s'",
-                                        colLetters, rowNum, self.name))
-                                end
-                                local numberStyle = cellStyle.numFmtId
-                                if not numberStyle then
-                                    numberStyle = 0
-                                end
-                                if numberStyle == 0  or  numberStyle == 1 then
-                                    colType = __cellMetatable.INT
+                                if cellStyle then
+                                    local numberStyle = cellStyle.numFmtId
+                                    if not numberStyle then
+                                        numberStyle = 0
+                                    end
+                                    if numberStyle == 0  or  numberStyle == 1 then
+                                        colType = __cellMetatable.INT
+                                    else
+                                        colType = __cellMetatable.DOUBLE
+                                    end
+                                    data = tonumber(data)
                                 else
-                                    colType = __cellMetatable.DOUBLE
+                                    colType = __cellMetatable.STRING
+                                    data = tostring(data)
                                 end
-                                data = tonumber(data)
                             end
 
                             --local formula
