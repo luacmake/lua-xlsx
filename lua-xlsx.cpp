@@ -408,7 +408,7 @@ local __sheetMetatable = {
                                 data = data == '1'
                             else
                                 local cellS = tonumber(columnNode['@'].s)
-                                local cellStyle = self.workbook.styles.cellXfs[cellS - 1]
+                                local cellStyle = cellS and self.workbook.styles.cellXfs[cellS - 1] or nil
                                 if cellStyle then
                                     local numberStyle = cellStyle.numFmtId
                                     if not numberStyle then
