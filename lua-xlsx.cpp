@@ -75,7 +75,9 @@ local lom = require "lxp.lom"
 
 local function xml_depth(vals)
 	local valCount = #vals
-	if valCount == 1  and  type(vals[1]) ~= 'table' then
+    if valCount == 0 then
+        return ""
+    elseif valCount == 1  and type(vals[1]) ~= 'table' then
 		return vals[1]
 	end
 
